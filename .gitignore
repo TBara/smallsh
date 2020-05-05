@@ -1,0 +1,4 @@
+*test.c
+!*.gitignore
+!*p3test*
+!*smallsh.c
