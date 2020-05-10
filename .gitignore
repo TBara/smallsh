@@ -1,4 +1,8 @@
 *test.c
+*tst
+t*
+r*
+.nfs*
 !*.gitignore
 !*p3test*
-!*smallsh.c
+!*smallsh*
