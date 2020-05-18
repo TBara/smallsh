@@ -40,7 +40,6 @@ void set_input_fd_bg(int *sourceFD, int *result, char *input_file);
 void set_output_fd_bg(int *targetFD, int *result, char *output_file);
 void set_input_fd_fg(int *sourceFD, int *result, char *input_file);
 void set_output_fd_fg(int *targetFD, int *result, char *output_file);
-void getInput(char *userInput, size_t buffer_size);
 
 // Main driver function
 void main(){
@@ -83,8 +82,8 @@ void main(){
         while (1)
         {
             //fflush(stdout);
-            printf(": ");
-            //write(STDOUT_FILENO, ": ", 2);
+            //printf(": ");
+            write(STDOUT_FILENO, ": ", 2);
             fflush(stdout);
             numCharsEntered = getline(&userInput, &buffer_size, stdin); // Get a line from the user
             if (numCharsEntered == -1) {
