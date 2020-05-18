@@ -10,14 +10,21 @@
 
 #define BUFFER_MAX 2048
 #define ARG_MAX 513
+
+struct Child_Exit_Info {
+    pid_t pid;
+    int   status;
+};
+
 const char *AMP = "&";
 volatile sig_atomic_t B_GND = 0; 
 volatile sig_atomic_t PID_CNT = 0;
-pid_t PID_ARR[ARG_MAX];
+int STATUS = 0;
+struct Child_Exit_Info PID_ARR[ARG_MAX];
 
 // Prototypes
-void add_pid_arr(pid_t status);
-void del_pid_arr();
+void readStatus();
+void add_pid_arr(struct Child_Exit_Info);
 void chk_pid_arr();
 void sigint_handler(int signum);
 void sigchld_handler(int signum);
@@ -33,31 +40,37 @@ void set_input_fd_bg(int *sourceFD, int *result, char *input_file);
 void set_output_fd_bg(int *targetFD, int *result, char *output_file);
 void set_input_fd_fg(int *sourceFD, int *result, char *input_file);
 void set_output_fd_fg(int *targetFD, int *result, char *output_file);
+void getInput(char *userInput, size_t buffer_size);
 
 // Main driver function
-void main()
-{
+void main(){
     char *arg_arr[ARG_MAX]; // Store passed in arguments
     int arg_cnt = 0;
+
+    // Catches and handles signals from completed child processes
+    struct sigaction SIGCHLD_action = {0};
+    SIGCHLD_action.sa_handler = sigchld_handler;
+    sigfillset(&SIGCHLD_action.sa_mask);
+    SIGCHLD_action.sa_flags=SA_RESTART;
+    sigaction(SIGCHLD, &SIGCHLD_action, NULL);
     
+    // Catches and handles SIGINT - ^C
     struct sigaction SIGINT_action = {0};
     SIGINT_action.sa_handler = sigint_handler;
-    SIGINT_action.sa_handler = sigchld_handler;
     sigfillset(&SIGINT_action.sa_mask);
-    //SIGINT_action.sa_flags = SA_RESTART;
+    SIGINT_action.sa_flags=SA_RESTART;
     sigaction(SIGINT, &SIGINT_action, NULL);
-    sigaction(SIGCHLD, &SIGINT_action, NULL);
 
+    // Catches and handles SIGTSTP - ^Z
     struct sigaction sig_tstp={0};	
 	sig_tstp.sa_handler = &sigtstp_handler;
 	sigfillset(&sig_tstp.sa_mask);
-	//sig_tstp.sa_flags=SA_RESTART;
+	sig_tstp.sa_flags=SA_RESTART;
 	sigaction(SIGTSTP, &sig_tstp, NULL); 
 
     int numCharsEntered = -5;
-    int stat = 0;
     int *status;
-    status = &stat;
+    status = &STATUS;
     size_t buffer_size = 0;   
     char *userInput = NULL;  
 
@@ -69,9 +82,8 @@ void main()
         // Get input from the user
         while (1)
         {
-            fflush(stdout);
+            //fflush(stdout);
             printf(": ");
-            fflush(stdout);
             //write(STDOUT_FILENO, ": ", 2);
             fflush(stdout);
             numCharsEntered = getline(&userInput, &buffer_size, stdin); // Get a line from the user
@@ -100,22 +112,19 @@ void main()
             if(B_GND == 0){
                 // Run in either mode
                 if ((arg_cnt > 0) && isBackground(arg_arr, &arg_cnt)){
+                    //printf("run in background\n"); fflush(stdout);
                     start_background(arg_arr, input_file, output_file);
                 } else if ((arg_cnt > 0) && !isBackground(arg_arr, &arg_cnt)) {
+                    //printf("run in foreground\n"); fflush(stdout);
                     start_foreground(arg_arr, input_file, output_file, status);
                 }
 
             } else if(B_GND == 1){
                 // Run in foreground no matter what
-                if ((arg_cnt > 0) && isBackground(arg_arr, &arg_cnt)){
-                    start_foreground(arg_arr, input_file, output_file, status);
-                } else if ((arg_cnt > 0) && !isBackground(arg_arr, &arg_cnt)) {
-                    start_foreground(arg_arr, input_file, output_file, status);
-                }             
+                isBackground(arg_arr, &arg_cnt);
+                start_foreground(arg_arr, input_file, output_file, status);            
             }            
         }
-
-        chk_pid_arr();
 
         // Free the memory allocated by getline() or else memory leak
         free(input_file);
@@ -125,31 +134,29 @@ void main()
     }
 }
 
-//
-void add_pid_arr(pid_t pid){
+// Add a struct, with pid and exit status, to an array
+void add_pid_arr(struct Child_Exit_Info chld){
+    //printf("Adding pid: %d\n", chld.pid);
     if(PID_CNT < (ARG_MAX - 1)){
-        PID_ARR[PID_CNT] = pid;
+        PID_ARR[PID_CNT] = chld;
         PID_CNT++;
     }
 }
 
-//
-void del_pid_arr(){
-    if(PID_CNT < 0){
-        PID_ARR[PID_CNT] = 0;
-        PID_CNT--;
-    }
-}
-
-//
+// Iterate PID_ARR and write out status of completed child prcesses
 void chk_pid_arr(){
-    while (PID_CNT < 0)
+    while (PID_CNT > 0)
     {
-        pid_t *status = &PID_ARR[PID_CNT];
+        PID_CNT--;
+        int stat = PID_ARR[PID_CNT].status;
+        pid_t *status = &stat;
+        printf("background pid %d is done: ", PID_ARR[PID_CNT].pid);
         getStatus(status);
-        del_pid_arr(PID_ARR[PID_CNT]);
+        // Reset read values
+        PID_ARR[PID_CNT].pid = -5;
+        PID_ARR[PID_CNT].status = -5;
+        
     }
-
 }
 
 // Run processes in the foreground, parant waits for child to finish
@@ -188,12 +195,10 @@ void start_foreground(char *arg_arr[], char *input_file, char *output_file, int 
         *status = childExitStatus;
         break;
     }
-
 }
 
 // Run processes in the background, parant does not wait for child to finish
-void start_background(char *arg_arr[], char *input_file, char *output_file)
-{
+void start_background(char *arg_arr[], char *input_file, char *output_file){
     int sourceFD, targetFD, result;
     pid_t spawnPid = -5;
     pid_t childPid = -5;
@@ -209,9 +214,8 @@ void start_background(char *arg_arr[], char *input_file, char *output_file)
     }
     case 0:
     {
-        printf("background pid is %d\n", getpid());
+        printf("background pid is %i\n", getpid());
         fflush(stdout);
-
         // Do any file redirects
         set_input_fd_bg(&sourceFD, &result, input_file);
         set_output_fd_bg(&targetFD, &result, output_file);
@@ -324,25 +328,27 @@ void set_output_fd_fg(int *targetFD, int *result, char *output_file){
 }
 
 // Checks the status of process that's finished
-void getStatus(pid_t *child_status)
-{
+void getStatus(pid_t *child_status){
+    int tmp = *child_status;
+    //printf("tmp %d\n", tmp);
+    fflush(stdout);
     if (WIFEXITED(*child_status) != 0)
     {
         // get status after normal exit
         printf("exit value %d\n", (int)WEXITSTATUS(*child_status));
         fflush(stdout);
+        STATUS = tmp;
     }
     else if (WIFSIGNALED(*child_status) != 0)
     {
         // get exit signal
-        printf("\nterminated by signal %d\n", (int)WTERMSIG(*child_status));
+        printf("terminated by signal %d\n", (int)WTERMSIG(*child_status));
         fflush(stdout);
     }
 }
 
 // Changes cwd to home or to supplied path
-void chng_dir(char *arg_arr[])
-{
+void chng_dir(char *arg_arr[]){
     char *dir;
     if (arg_arr[1] == NULL)
     {
@@ -365,8 +371,7 @@ void chng_dir(char *arg_arr[])
 }
 
 // Returns true if the last argument is &
-bool isBackground(char *arg_arr[], int *arg_cnt)
-{
+bool isBackground(char *arg_arr[], int *arg_cnt){
     if (strcmp(arg_arr[(*arg_cnt) - 1], AMP) == 0)
     {
         // Remove the & from arg_arr
@@ -381,8 +386,7 @@ bool isBackground(char *arg_arr[], int *arg_cnt)
 }
 
 // Receives user's input and parses into arguments, sets file redirects, and sets background run flag
-void parseInput(char *input, char *arg_arr[], int *arg_cnt, char *input_file, char *output_file)
-{
+void parseInput(char *input, char *arg_arr[], int *arg_cnt, char *input_file, char *output_file){
     memset(input_file, '\0', BUFFER_MAX);
     memset(output_file, '\0', BUFFER_MAX);
     memset(arg_arr, '\0', ARG_MAX);
@@ -448,30 +452,30 @@ void parseInput(char *input, char *arg_arr[], int *arg_cnt, char *input_file, ch
     }
 }
 
-// Handle SIGINT signal
-void sigint_handler(int signo)
-{
-    char *message = "terminated by signal \n";
-    write(STDOUT_FILENO, message, 22);
+// Prints out the terminating signal
+void readStatus(){
+    printf("terminated by signal %d\n", STATUS);
     fflush(stdout);
 }
 
+// Handle SIGINT signal
+void sigint_handler(int signum){
+    STATUS = signum;
+    readStatus();
+}
+
 // Handle SIGCHLD signal
-void sigchld_handler(int signum)
-{
+void sigchld_handler(int signum){
     pid_t pid;
     int   status;
     pid = waitpid(-1, &status, WNOHANG); // Get the pid
     
     if (pid > 1)
     {
-        //printf("Child pid %d is done\n", pid);
-        //getStatus(&status); // Get the exit status
-
-        add_pid_arr(pid);
-        write(STDOUT_FILENO, "\n", 1);
-        fflush(stdout);   
+        struct Child_Exit_Info chld_info = {pid, status};
+        add_pid_arr(chld_info);
     }
+    chk_pid_arr();
 }
 
 // Toggle background-only mode on/off
