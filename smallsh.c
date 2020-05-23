@@ -1,3 +1,9 @@
+/**************************************************************************************************
+ * Tom Barabasz
+ * barabast@oregonstate.edu
+ * CS344 - Project 3 - Smallsh
+ * 05/20/20
+ * ***********************************************************************************************/
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -81,8 +87,6 @@ void main(){
         // Get input from the user
         while (1)
         {
-            //fflush(stdout);
-            //printf(": ");
             write(STDOUT_FILENO, ": ", 2);
             fflush(stdout);
             numCharsEntered = getline(&userInput, &buffer_size, stdin); // Get a line from the user
@@ -125,11 +129,20 @@ void main(){
             }            
         }
 
-        // Free the memory allocated by getline() or else memory leak
+        // Free dynamically allocated memory 
         free(input_file);
         free(output_file);
         free(userInput);
+        
+        int i;
+        for(i = 0; i <= arg_cnt; i ++){
+            free(arg_arr[i]);
+            arg_arr[i] = NULL;
+        }
+
         userInput = NULL;
+        input_file = NULL;
+        output_file = NULL;
     }
 }
 
